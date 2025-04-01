@@ -1,11 +1,12 @@
-use crate::config::MAX_SYSCALL_NUM;
+use alloc::collections::BTreeMap;
 
 /// record task syscall times
-#[derive(Copy, Clone, PartialEq, Eq)]
-pub struct TaskSyscallCount(pub [usize; MAX_SYSCALL_NUM]);
+#[derive(Clone, PartialEq, Eq)]
+pub struct TaskSyscallCount(pub BTreeMap<usize, usize>);
+// pub struct TaskSyscallCount(pub [usize; MAX_SYSCALL_NUM]);
 
 impl TaskSyscallCount {
     pub fn zero_init() -> Self {
-        Self([0; MAX_SYSCALL_NUM])
+        Self(BTreeMap::new())
     }
 }
