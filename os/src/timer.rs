@@ -14,6 +14,8 @@ const MICRO_PER_SEC: usize = 1_000_000;
 
 /// Get the current time in ticks
 pub fn get_time() -> usize {
+    let raw_time = time::read();
+    println!("Get raw time: {}", raw_time);
     time::read()
 }
 

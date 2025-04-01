@@ -21,6 +21,11 @@ struct UserStack {
     data: [u8; USER_STACK_SIZE],
 }
 
+// 内核栈与用户栈在0x80200000开始的地址上，由编译器在链接时确认
+// data.as_ptr() 是低位
+// 每个app都有一个内核stack和一个用户stack
+// stack all used for save context
+
 static KERNEL_STACK: [KernelStack; MAX_APP_NUM] = [KernelStack {
     data: [0; KERNEL_STACK_SIZE],
 }; MAX_APP_NUM];
@@ -30,6 +35,7 @@ static USER_STACK: [UserStack; MAX_APP_NUM] = [UserStack {
 }; MAX_APP_NUM];
 
 impl KernelStack {
+    /// 内核栈底
     fn get_sp(&self) -> usize {
         self.data.as_ptr() as usize + KERNEL_STACK_SIZE
     }
@@ -43,6 +49,7 @@ impl KernelStack {
 }
 
 impl UserStack {
+    /// 用户栈底
     fn get_sp(&self) -> usize {
         self.data.as_ptr() as usize + USER_STACK_SIZE
     }
