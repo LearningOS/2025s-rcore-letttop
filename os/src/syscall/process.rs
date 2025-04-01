@@ -63,7 +63,9 @@ pub fn sys_trace(trace_request: usize, id: usize, data: usize) -> isize {
             let inner = TASK_MANAGER.inner.exclusive_access();
             let current_task_id = inner.current_task;
             let current_syscall_id = id;
-            let count = inner.tasks[current_task_id].task_syscall_count.0[current_syscall_id];
+            let count = inner.tasks[current_task_id]
+                .task_syscall_count
+                .count(current_syscall_id);
             drop(inner);
             count as isize
         }

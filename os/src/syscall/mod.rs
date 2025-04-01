@@ -35,13 +35,9 @@ pub fn syscall(syscall_id: usize, args: [usize; 3]) -> isize {
     let mut inner = TASK_MANAGER.inner.exclusive_access();
     let current_task_id = inner.current_task;
     let current_syscall_id = syscall_id;
-    let count_syscall_count = inner.tasks[current_task_id]
+    inner.tasks[current_task_id]
         .task_syscall_count
-        .0
-        .entry(current_syscall_id)
-        .or_insert(0);
-    *count_syscall_count += 1;
-
+        .add(current_syscall_id);
     drop(inner);
     // debug
     // println!(
