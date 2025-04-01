@@ -35,8 +35,16 @@ pub fn syscall(syscall_id: usize, args: [usize; 3]) -> isize {
     let mut inner = TASK_MANAGER.inner.exclusive_access();
     let current_task_id = inner.current_task;
     let current_syscall_id = syscall_id;
-    inner.tasks[current_task_id].task_syscall_count.0[current_syscall_id] += 1;
+    let current_syscall_time =
+        inner.tasks[current_task_id].task_syscall_count.0[current_syscall_id] + 1;
+    inner.tasks[current_task_id].task_syscall_count.0[current_syscall_id] = current_syscall_time;
     drop(inner);
+    // debug
+    // println!(
+    //     "task {} call syscall {} the {} times",
+    //     current_task_id, current_syscall_id, current_syscall_time
+    // );
+
     // handle
     match syscall_id {
         SYSCALL_WRITE => sys_write(args[0], args[1] as *const u8, args[2]),
