@@ -1,8 +1,16 @@
 //! Process management syscalls
-use crate::task::{change_program_brk, exit_current_and_run_next, suspend_current_and_run_next};
+
+use crate::{
+    mm::translated_byte_buffer,
+    task::{
+        change_program_brk, current_user_token, exit_current_and_run_next,
+        suspend_current_and_run_next,
+    },
+    timer::get_time_us,
+};
 
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct TimeVal {
     pub sec: usize,
     pub usec: usize,
@@ -25,9 +33,37 @@ pub fn sys_yield() -> isize {
 /// YOUR JOB: get time with second and microsecond
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TimeVal`] is splitted by two pages ?
-pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
+/// should handle by fn translated_byte_buffer
+pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
     trace!("kernel: sys_get_time");
-    -1
+
+    let time_val_byte_len = core::mem::size_of::<TimeVal>();
+    let ts_addr_byte_buffer =
+        translated_byte_buffer(current_user_token(), ts as *mut u8, time_val_byte_len);
+
+    let us = get_time_us();
+
+    let time_val = TimeVal {
+        sec: us / 1_000_000,
+        usec: us % 1_000_000,
+    };
+    let time_val_byte = unsafe {
+        core::slice::from_raw_parts(&time_val as *const TimeVal as *const u8, time_val_byte_len)
+    };
+
+    // for (i, &byte) in time_val_byte.iter().enumerate() {
+    //     *ts_addr_byte_buffer[i] = byte;
+    // }
+
+    let mut byte_copied = 0;
+    for buffer in ts_addr_byte_buffer.into_iter() {
+        let byte_copied_this_time = buffer.len().min(time_val_byte_len - byte_copied);
+        buffer[..byte_copied_this_time]
+            .copy_from_slice(&time_val_byte[byte_copied..byte_copied + byte_copied_this_time]);
+        byte_copied += byte_copied_this_time;
+    }
+
+    0
 }
 
 /// TODO: Finish sys_trace to pass testcases
