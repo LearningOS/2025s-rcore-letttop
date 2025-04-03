@@ -106,6 +106,7 @@ impl VirtAddr {
 
     /// Get the page offset of virtual address
     pub fn page_offset(&self) -> usize {
+        // 0x1000-1=0x00000111, only latest 12 bit
         self.0 & (PAGE_SIZE - 1)
     }
 
@@ -157,11 +158,12 @@ impl From<PhysPageNum> for PhysAddr {
 
 impl VirtPageNum {
     /// Get the indexes of the page table entry
+    /// 索引时先用VPN[2]，对应的是indexes[0]
     pub fn indexes(&self) -> [usize; 3] {
         let mut vpn = self.0;
         let mut idx = [0usize; 3];
         for i in (0..3).rev() {
-            idx[i] = vpn & 511;
+            idx[i] = vpn & 511; // 2^9-1
             vpn >>= 9;
         }
         idx
