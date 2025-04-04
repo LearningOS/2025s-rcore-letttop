@@ -1,10 +1,10 @@
 //! Process management syscalls
 
 use crate::{
-    mm::translated_byte_buffer,
+    mm::{translated_byte_buffer, PageTable, PhysAddr, VirtAddr},
     task::{
         change_program_brk, current_user_token, exit_current_and_run_next,
-        suspend_current_and_run_next,
+        suspend_current_and_run_next, TASK_MANAGER,
     },
     timer::get_time_us,
 };
@@ -68,9 +68,56 @@ pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
 
 /// TODO: Finish sys_trace to pass testcases
 /// HINT: You might reimplement it with virtual memory management.
-pub fn sys_trace(_trace_request: usize, _id: usize, _data: usize) -> isize {
+pub fn sys_trace(trace_request: usize, id: usize, data: usize) -> isize {
     trace!("kernel: sys_trace");
-    -1
+    match trace_request {
+        0 => {
+            // let ptr: *mut u8 = id as *mut u8;
+            // let ptr_byte = unsafe { *ptr };
+            // ptr_byte as isize
+
+            let token = current_user_token();
+            let page_table = PageTable::from_token(token);
+            //
+            let va = VirtAddr::from(id);
+            let vpn = va.floor();
+            let offset = va.page_offset();
+            //
+            let pte = page_table.translate(vpn).unwrap();
+            if !pte.is_valid() {
+                return -1;
+            }
+            let ptr = PhysAddr::from(pte.ppn()).0 + offset;
+            unsafe { *(ptr as *mut isize) }
+        }
+        1 => {
+            // let ptr: *mut u8 = id as *mut u8;
+            // unsafe {
+            //     *ptr = data as u8;
+            // }
+
+            let token = current_user_token();
+            let page_table = PageTable::from_token(token);
+            //
+            let va = VirtAddr::from(id);
+            let vpn = va.floor();
+            let offset = va.page_offset();
+            //
+            let pte = page_table.translate(vpn).unwrap();
+            if !pte.is_valid() {
+                return -1;
+            }
+            let ptr = PhysAddr::from(pte.ppn()).0 + offset;
+            unsafe { *(ptr as *mut usize) = data }
+
+            0
+        }
+        2 => {
+            // read count
+            TASK_MANAGER.get_current_task_syscall_count(id) as isize
+        }
+        _ => -1,
+    }
 }
 
 // YOUR JOB: Implement mmap.

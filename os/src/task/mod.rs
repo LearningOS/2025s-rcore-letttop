@@ -11,6 +11,7 @@
 
 mod context;
 mod switch;
+mod syscall_count;
 #[allow(clippy::module_inception)]
 mod task;
 
@@ -68,6 +69,29 @@ lazy_static! {
             },
         }
     };
+}
+
+impl TaskManager {
+    /// get the times of input syscall_id of current task
+    pub fn get_current_task_syscall_count(&self, syscall_id: usize) -> usize {
+        let inner = TASK_MANAGER.inner.exclusive_access();
+        let current_task_id = inner.current_task;
+        let count = inner.tasks[current_task_id]
+            .task_syscall_count
+            .read_syscall_id_count(syscall_id);
+        drop(inner);
+        count
+    }
+
+    /// add the times of input syscall_id of current task
+    pub fn add_current_task_syscall_count(&self, syscall_id: usize) {
+        let mut inner = TASK_MANAGER.inner.exclusive_access();
+        let current_task_id = inner.current_task;
+        inner.tasks[current_task_id]
+            .task_syscall_count
+            .add_syscall_id_count(syscall_id);
+        drop(inner);
+    }
 }
 
 impl TaskManager {
