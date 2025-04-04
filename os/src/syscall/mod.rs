@@ -26,7 +26,7 @@ const SYSCALL_MMAP: usize = 222;
 const SYSCALL_TRACE: usize = 410;
 
 mod fs;
-mod pages;
+
 mod process;
 use crate::task::TASK_MANAGER;
 use fs::*;

@@ -1,5 +1,6 @@
 //! Process management syscalls
 
+use crate::{config::PAGE_SIZE_BITS, mm::MapPermission};
 use crate::{
     mm::{translated_byte_buffer, PageTable, PhysAddr, VirtAddr},
     task::{
@@ -120,10 +121,62 @@ pub fn sys_trace(trace_request: usize, id: usize, data: usize) -> isize {
     }
 }
 
-// YOUR JOB: Implement mmap.
-pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
-    trace!("kernel: sys_mmap NOT IMPLEMENTED YET!");
-    -1
+/// Map a file to memory
+///
+/// Currently only allocates memory without actual file mapping.
+///
+/// # Arguments
+/// * 'start' - A page-aligned virtual address
+/// * 'len'   - Byte length of the file
+/// * 'prot'  - Protection bits: [0..=2] for R W X, others are 0
+///
+/// # Returns
+/// * '0'     - on success
+/// * '-1'    - on error
+pub fn sys_mmap(start: usize, len: usize, prot: usize) -> isize {
+    // start should be page-aligned
+    // prot[2..] should be 0
+    // prot=0 is meansless
+    if (start % 512 != 0) || (prot & !0x7 != 0) || (prot & 0x7 == 0) {
+        return -1;
+    }
+    // alloc memory
+    // change from translated_byte_buffer
+    let map_permission = MapPermission::from_bits((prot as u8) << 1).unwrap() | MapPermission::U;
+    //
+    let mut inner = TASK_MANAGER.inner.exclusive_access();
+    let current_task_id = inner.current_task;
+    let current_task = &mut inner.tasks[current_task_id];
+    let memory_set = &mut current_task.memory_set;
+
+    //
+    let mut start_va = start;
+    let end_va = start + len;
+    while start_va < end_va {
+        let vpn = VirtAddr::from(start_va).floor();
+        if let Some(pte) = memory_set.translate(vpn) {
+            // 已被使用
+            if !pte.is_valid() {
+                drop(inner);
+                return -1;
+            } else {
+                // 重复利用，应该不需要实现
+            }
+        } else {
+            // 创建新的映射区域
+            memory_set.insert_framed_area(
+                start_va.into(),                    // 页开头
+                (start_va + PAGE_SIZE_BITS).into(), // 页结束
+                map_permission,                     // R W X U
+            );
+        }
+
+        start_va += PAGE_SIZE_BITS;
+    }
+
+    // success
+    drop(inner);
+    0
 }
 
 // YOUR JOB: Implement munmap.

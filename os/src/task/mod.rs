@@ -38,15 +38,15 @@ pub struct TaskManager {
     /// total number of tasks
     num_app: usize,
     /// use inner value to get mutable access
-    inner: UPSafeCell<TaskManagerInner>,
+    pub inner: UPSafeCell<TaskManagerInner>,
 }
 
 /// The task manager inner in 'UPSafeCell'
-struct TaskManagerInner {
+pub struct TaskManagerInner {
     /// task list
-    tasks: Vec<TaskControlBlock>,
+    pub tasks: Vec<TaskControlBlock>,
     /// id of current `Running` task
-    current_task: usize,
+    pub current_task: usize,
 }
 
 lazy_static! {
@@ -71,6 +71,7 @@ lazy_static! {
     };
 }
 
+// syscall related
 impl TaskManager {
     /// get the times of input syscall_id of current task
     pub fn get_current_task_syscall_count(&self, syscall_id: usize) -> usize {
