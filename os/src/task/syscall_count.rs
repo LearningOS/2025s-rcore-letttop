@@ -13,7 +13,7 @@ impl TaskSyscallCount {
     pub fn add_syscall_id_count(&mut self, syscall_id: usize) {
         // find, return
         for (id, value) in self.0.iter_mut() {
-            if *id == syscall_id {
+            if (*id == syscall_id) && (*id < 2048) {
                 *value += 1;
                 return;
             }
@@ -35,7 +35,7 @@ impl TaskSyscallCount {
         // search
         // find, return
         for (id, value) in self.0.iter() {
-            if *id == syscall_id {
+            if (*id == syscall_id) && (*id < 2048) {
                 return *value;
             }
         }
