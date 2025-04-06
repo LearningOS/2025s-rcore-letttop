@@ -2,7 +2,7 @@
 
 use crate::config::PAGE_SIZE;
 use crate::mm::frame_allocator::FRAME_ALLOCATOR;
-use crate::mm::{MapPermission, PageTableEntry};
+use crate::mm::MapPermission;
 use crate::{
     mm::{translated_byte_buffer, PageTable, PhysAddr, VirtAddr},
     task::{
@@ -90,7 +90,7 @@ pub fn sys_trace(trace_request: usize, id: usize, data: usize) -> isize {
                 Some(pte) => pte,
                 None => return -1,
             };
-            if !pte.is_valid() || !pte.readable() {
+            if !pte.is_valid() || !pte.readable() || !pte.user_able() {
                 return -1;
             }
             let ptr = PhysAddr::from(pte.ppn()).0 + offset;
@@ -113,7 +113,7 @@ pub fn sys_trace(trace_request: usize, id: usize, data: usize) -> isize {
                 Some(pte) => pte,
                 None => return -1,
             };
-            if !pte.is_valid() || !pte.writable() {
+            if !pte.is_valid() || !pte.writable() || !pte.user_able() {
                 return -1;
             }
             let ptr = PhysAddr::from(pte.ppn()).0 + offset;
@@ -142,12 +142,14 @@ pub fn sys_trace(trace_request: usize, id: usize, data: usize) -> isize {
 /// * '0'     - on success
 /// * '-1'    - on error
 pub fn sys_mmap(start: usize, len: usize, prot: usize) -> isize {
-    // start should be page-aligned
-    // prot[2..] should be 0
-    // prot=0 is meansless
+    // check input valid
+    // * start should be page-aligned
+    // * prot[2..] should be 0
+    // * prot=0 is meansless
     if (start % PAGE_SIZE != 0) || (prot & !0x7 != 0) || (prot & 0x7 == 0) {
         return -1;
     }
+    // TODO, should alloc even len is 0
     if len == 0 {
         return 0;
     };
@@ -155,87 +157,37 @@ pub fn sys_mmap(start: usize, len: usize, prot: usize) -> isize {
     let frame_allocator = FRAME_ALLOCATOR.exclusive_access();
     let available_pages = frame_allocator.unused_phy_pages();
     drop(frame_allocator);
-    //
     let required_pages = (len + PAGE_SIZE - 1) / PAGE_SIZE; // 向上取整
     if required_pages > available_pages {
         return -1;
     }
     // alloc memory
-    // change from translated_byte_buffer
-    let map_permission = MapPermission::from_bits((prot as u8) << 1).unwrap() | MapPermission::U;
-    //
+    // * check pages
+    // ** vpn
+    let start_va: VirtAddr = start.into();
+    let start_vpn = start_va.floor();
+    let end_va: VirtAddr = (start + len).into();
+    let end_vpn = end_va.ceil();
+    // ** memory_set exclusive_access
     let mut inner = TASK_MANAGER.inner.exclusive_access();
     let current_task_id = inner.current_task;
-    let current_task = &mut inner.tasks[current_task_id];
-    let memory_set = &mut current_task.memory_set;
-
-    //
-    let mut start_va = start;
-    let end_va = start + len;
-    //debug
-    println!("start va is {:x}", start_va);
-    println!("end   va is {:x}", end_va);
-
-    while start_va < end_va {
-        let vpn = VirtAddr::from(start_va).floor();
-
-        if memory_set.translate(vpn).is_some() {
-            println!("page with vpn {:x?} is mapped", vpn);
-            drop(inner);
-            return -1;
-        }
-
-        println!(
-            "map new space {:x} to {:x}",
-            start_va,
-            start_va + PAGE_SIZE - 1
-        );
-        // debug
-        {
-            if memory_set.translate((vpn.0 + 1).into()).is_some() {
-                println!("next page is mapped before");
-            } else {
-                println!("page with vpn {:x?} is not mapped before", (vpn.0 + 1));
-            }
-            if memory_set.translate((vpn.0 + 2).into()).is_some() {
-                println!("next page is mapped before");
-            } else {
-                println!("page with vpn {:x?} is not mapped before", (vpn.0 + 2));
-            }
-            if memory_set.translate((vpn.0 + 3).into()).is_some() {
-                println!("next page is mapped before");
-            } else {
-                println!("page with vpn {:x?} is not mapped before", (vpn.0 + 3));
+    let memory_set = &mut inner.tasks[current_task_id].memory_set;
+    // ** loop check pages valid
+    let mut cur_vpn = start_vpn;
+    while cur_vpn < end_vpn {
+        if let Some(pte) = memory_set.translate(cur_vpn) {
+            if pte.is_valid() {
+                trace!("sys_mmap: page with vpn {:x?} is mapped", cur_vpn);
+                drop(inner);
+                return -1;
             }
         }
-
-        // 创建新的映射区域
-        memory_set.insert_framed_area(
-            start_va.into(),                   // 页开头
-            (start_va + PAGE_SIZE - 1).into(), // 页结束
-            map_permission,                    // R W X U
-        );
-        // debug
-        {
-            if memory_set.translate((vpn.0 + 1).into()).is_some() {
-                println!("page with vpn {:x?} is mapped after", (vpn.0 + 1));
-            } else {
-                println!("page with vpn {:x?} is not mapped after", (vpn.0 + 1));
-            }
-            if memory_set.translate((vpn.0 + 2).into()).is_some() {
-                println!("page with vpn {:x?} is mapped after", (vpn.0 + 2));
-            } else {
-                println!("page with vpn {:x?} is not mapped after", (vpn.0 + 2));
-            }
-            if memory_set.translate((vpn.0 + 3).into()).is_some() {
-                println!("page with vpn {:x?} is mapped after", (vpn.0 + 3));
-            } else {
-                println!("page with vpn {:x?} is not mapped after", (vpn.0 + 3));
-            }
-        }
-        start_va += PAGE_SIZE;
+        cur_vpn.0 += 1
     }
-
+    // * alloc
+    let map_permission = MapPermission::from_bits_truncate((prot as u8) << 1) | MapPermission::U;
+    memory_set.insert_framed_area(start_va, end_va, map_permission);
+    trace!("sysmmap: alloc area");
     // success
     drop(inner);
     0
@@ -243,36 +195,49 @@ pub fn sys_mmap(start: usize, len: usize, prot: usize) -> isize {
 
 // YOUR JOB: Implement munmap.
 pub fn sys_munmap(start: usize, len: usize) -> isize {
-    // start should be page-aligned
+    // check input valid
+    // * start should be page-aligned
     if start % PAGE_SIZE != 0 {
         return -1;
     }
     if len == 0 {
         return 0;
     };
-    //
+    // dealloc
+    // ** vpn
+    let start_va: VirtAddr = start.into();
+    let start_vpn = start_va.floor();
+    let end_va: VirtAddr = (start + len).into();
+    let end_vpn = end_va.ceil();
+    // ** memory_set exclusive_access
     let mut inner = TASK_MANAGER.inner.exclusive_access();
     let current_task_id = inner.current_task;
-    let current_task = &mut inner.tasks[current_task_id];
-    let memory_set = &mut current_task.memory_set;
-    //
-    let mut start_va = start;
-    let end_va = start + len * 8;
+    let memory_set = &mut inner.tasks[current_task_id].memory_set;
 
-    while start_va < end_va {
-        let vpn = VirtAddr::from(start_va).floor();
-        if let Some(pte) = memory_set.page_table.find_pte(vpn) {
+    let mut cur_vpn = start_vpn;
+    while cur_vpn < end_vpn {
+        if let Some(pte) = memory_set.translate(cur_vpn) {
             if !pte.is_valid() {
+                trace!("sys_munmap: page with vpn {:x?} is not mapped", cur_vpn);
+                drop(inner);
                 return -1;
             }
-            *pte = PageTableEntry::empty();
-        } else {
-            drop(inner);
-            return -1;
         }
-
-        start_va += PAGE_SIZE;
+        cur_vpn.0 += 1
     }
+    let map_areas = &mut memory_set.areas;
+    //
+
+    //
+    for map_area in map_areas {
+        let (ma_start_vpn, ma_end_vpn) = map_area.vpn_range();
+        if (ma_start_vpn < end_vpn && ma_end_vpn > start_vpn)
+            || (ma_start_vpn > end_vpn && ma_end_vpn < start_vpn)
+        {
+            map_area.unmap(&mut memory_set.page_table);
+        };
+    }
+
     // success
     drop(inner);
     0

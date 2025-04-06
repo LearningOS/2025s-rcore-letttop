@@ -45,9 +45,9 @@ trait FrameAllocator {
 }
 /// an implementation for frame allocator
 pub struct StackFrameAllocator {
-    /// min page number
+    /// free min page number
     current: usize,
-    /// max page number
+    /// free max page number
     end: usize,
     /// recycled page numbers
     recycled: Vec<usize>,

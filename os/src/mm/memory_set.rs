@@ -35,9 +35,10 @@ lazy_static! {
 }
 /// address space
 pub struct MemorySet {
-    /// root page table
+    /// 3 level page table
     pub page_table: PageTable,
-    areas: Vec<MapArea>,
+    /// map areas
+    pub areas: Vec<MapArea>,
 }
 
 impl MemorySet {
@@ -234,6 +235,7 @@ impl MemorySet {
     pub fn translate(&self, vpn: VirtPageNum) -> Option<PageTableEntry> {
         self.page_table.translate(vpn)
     }
+
     /// shrink the area to new_end
     #[allow(unused)]
     pub fn shrink_to(&mut self, start: VirtAddr, new_end: VirtAddr) -> bool {
@@ -356,6 +358,10 @@ impl MapArea {
             }
             current_vpn.step();
         }
+    }
+
+    pub fn vpn_range(&self) -> (VirtPageNum, VirtPageNum) {
+        (self.vpn_range.get_start(), self.vpn_range.get_end())
     }
 }
 
