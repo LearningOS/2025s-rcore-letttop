@@ -1,4 +1,14 @@
+ fatal: repository 'https://rsproxy.cn/crates.io-index/' not found
+error: failed to update replaced source registry `crates-io`
 
+Caused by:
+  failed to fetch `https://rsproxy.cn/crates.io-index`
+
+Caused by:
+  process didn't exit successfully: `git fetch --force --update-head-ok 'https://rsproxy.cn/crates.io-index' '+HEAD:refs/remotes/origin/HEAD'` (exit status: 128)
+make: *** [Makefile:41: env] Error 101
+Error: Process completed with exit code 2.
+再次commit尝试
 
 # 实现功能
 1. 扩展了sys_trace: new: 物理地址直接交互
