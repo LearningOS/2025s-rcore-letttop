@@ -44,8 +44,11 @@ trait FrameAllocator {
 }
 /// an implementation for frame allocator
 pub struct StackFrameAllocator {
+    /// ppn
     current: usize,
+    /// ppn
     end: usize,
+    /// ppn
     recycled: Vec<usize>,
 }
 
@@ -114,6 +117,12 @@ pub fn frame_alloc() -> Option<FrameTracker> {
 /// Deallocate a physical page frame with a given ppn
 pub fn frame_dealloc(ppn: PhysPageNum) {
     FRAME_ALLOCATOR.exclusive_access().dealloc(ppn);
+}
+
+/// return unused physical pages
+pub fn unused_phy_pages() -> usize {
+    let frame_allocator = FRAME_ALLOCATOR.exclusive_access();
+    frame_allocator.end - frame_allocator.current + frame_allocator.recycled.len()
 }
 
 #[allow(unused)]

@@ -36,6 +36,7 @@ impl TaskControlBlock {
     }
 }
 
+/// 0
 pub struct TaskControlBlockInner {
     /// The physical page number of the frame where the trap context is placed
     pub trap_cx_ppn: PhysPageNum,
@@ -68,6 +69,12 @@ pub struct TaskControlBlockInner {
 
     /// Program break
     pub program_brk: usize,
+
+    /// stride at now
+    pub stride: usize,
+
+    /// prio
+    pub prio: usize,
 }
 
 impl TaskControlBlockInner {
@@ -82,6 +89,7 @@ impl TaskControlBlockInner {
     fn get_status(&self) -> TaskStatus {
         self.task_status
     }
+    /// 0
     pub fn is_zombie(&self) -> bool {
         self.get_status() == TaskStatus::Zombie
     }
@@ -118,6 +126,8 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: user_sp,
                     program_brk: user_sp,
+                    stride: 0,
+                    prio: 16,
                 })
             },
         };
@@ -191,6 +201,8 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
+                    stride: 0,
+                    prio: 16,
                 })
             },
         });
