@@ -16,3 +16,8 @@ xmas-elf = "0.7.0"
 virtio-drivers = { git = "https://github.com/rcore-os/virtio-drivers", rev = "4ee80e5" }
 easy-fs = { path = "../easy-fs" }
 
+[lints.clippy]
+bad_bit_mask = "allow"
+missing_safety_doc = "allow"
+new_without_default = "allow"
+slow_vector_initialization = "allow"

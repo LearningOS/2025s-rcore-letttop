@@ -238,6 +238,10 @@ impl UserBuffer {
         }
         total
     }
+    /// Empty
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 impl IntoIterator for UserBuffer {
