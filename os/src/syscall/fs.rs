@@ -3,6 +3,9 @@ use crate::fs::{open_file, OpenFlags, Stat};
 use crate::mm::{translated_byte_buffer, translated_str, UserBuffer};
 use crate::task::{current_task, current_user_token};
 
+/// 根据fd读取进程fd_table中的file
+/// 将buf+len包装成一个UserBuffer
+/// 将buf写入file
 pub fn sys_write(fd: usize, buf: *const u8, len: usize) -> isize {
     trace!("kernel:pid[{}] sys_write", current_task().unwrap().pid.0);
     let token = current_user_token();
@@ -24,6 +27,9 @@ pub fn sys_write(fd: usize, buf: *const u8, len: usize) -> isize {
     }
 }
 
+/// 根据fd读取进程fd_table中的file
+/// 将buf+len包装成一个UserBuffer
+/// 将file写入buf
 pub fn sys_read(fd: usize, buf: *const u8, len: usize) -> isize {
     trace!("kernel:pid[{}] sys_read", current_task().unwrap().pid.0);
     let token = current_user_token();

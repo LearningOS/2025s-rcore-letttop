@@ -17,6 +17,8 @@ impl File for Stdin {
     fn writable(&self) -> bool {
         false
     }
+    /// read a u8 from console
+    /// write u8 to user_buf
     fn read(&self, mut user_buf: UserBuffer) -> usize {
         assert_eq!(user_buf.len(), 1);
         // busy loop
