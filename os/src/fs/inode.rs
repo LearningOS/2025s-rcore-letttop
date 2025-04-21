@@ -4,14 +4,14 @@
 //!
 //! `UPSafeCell<OSInodeInner>` -> `OSInode`: for static `ROOT_INODE`,we
 //! need to wrap `OSInodeInner` into `UPSafeCell`
-use super::File;
+use super::{File, Stat, StatMode};
 use crate::drivers::BLOCK_DEVICE;
 use crate::mm::UserBuffer;
 use crate::sync::UPSafeCell;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use bitflags::*;
-use easy_fs::{EasyFileSystem, Inode};
+use easy_fs::{DiskInode, EasyFileSystem, Inode};
 use lazy_static::*;
 
 /// inode in memory
@@ -53,9 +53,51 @@ impl OSInode {
         }
         v
     }
+    /// init stat with mode only
+    pub fn stat(&self) -> Stat {
+        let inner = self.inner.exclusive_access();
+        let inode_id = {
+            let fs = inner.inode.fs.lock();
+
+            // 获取 inode_id
+            let inode_size = core::mem::size_of::<DiskInode>();
+            let inodes_per_block = (easy_fs::BLOCK_SZ / inode_size) as u32;
+
+            // 从 block_id 和 block_offset 反推 inode_id
+            let block_id = inner.inode.block_id as u32;
+            let block_offset = inner.inode.block_offset;
+            ((block_id - fs.inode_area_start_block) * inodes_per_block)
+                + ((block_offset / inode_size) as u32)
+            // 释放 fs 锁
+        };
+
+        // 获取硬链接数量：对于普通文件，需要扫描根目录来获取所有硬链接
+        let nlink = crate::fs::inode::ROOT_INODE.count_links(inode_id);
+
+        let stat = inner.inode.read_disk_inode(|disk_inode| {
+            let mode = match disk_inode.type_ {
+                easy_fs::DiskInodeType::File => StatMode::FILE,
+                easy_fs::DiskInodeType::Directory => StatMode::DIR,
+            };
+            Stat {
+                dev: 0,
+                ino: inode_id as u64,
+                mode,
+                nlink: nlink as u32,
+                pad: [0; 7],
+            }
+        });
+
+        if stat.mode == StatMode::FILE && stat.nlink == 0 {
+            Stat { nlink: 1, ..stat }
+        } else {
+            stat
+        }
+    }
 }
 
 lazy_static! {
+    /// ROOT_INODE
     pub static ref ROOT_INODE: Arc<Inode> = {
         let efs = EasyFileSystem::open(BLOCK_DEVICE.clone());
         Arc::new(EasyFileSystem::root_inode(&efs))
@@ -155,5 +197,8 @@ impl File for OSInode {
             total_write_size += write_size;
         }
         total_write_size
+    }
+    fn get_stat(&self) -> Stat {
+        self.stat()
     }
 }
