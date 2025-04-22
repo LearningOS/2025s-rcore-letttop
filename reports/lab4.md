@@ -1,30 +1,14 @@
 # 实现功能
-1. 迁移上一章的sys_get_time sys_mmap sys_munmap，主要是memory_set的获取
-2. sys_spawn，创建进程，设置父子关系，加入队列
-3. stride 调度算法，pass = BigStride / priority，TCB的mutable部分加入stride和prio
+1. sys_linkat  创建一个硬链接，即在根目录下创建一个目录项，指向一个已存在的文件inode
+2. sys_unlinkat   与sys_linkat相反，且在文件无硬链接是关闭文件
+3. sys_fstat    创建一个文件节点的stat结构，主要问题是处理资源的锁定与释放
 
 # 问答题
-1. Stride
- - 否，8bit 最大2^8-1=255，250+10=4 < 255
- - when prio >= 2, max pass = BigStride / 2; MAX(STRIDE_MAX – STRIDE_MIN) = 存储类型的上下界；如果存储类型的上下界 > BigStride / 2, 那么一开始0加上BigStride / 2，再加就会越界，实际的MAX(STRIDE_MAX – STRIDE_MIN)还是等于BigStride / 2
-  ```rust
-  use core::cmp::Ordering;
-  struct Stride(u64);
-  impl PartialOrd for Stride {
-      fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        if other.0.wrapping_sub(self.0) < 1 << 63 {
-        Some(Ordering::Less)
-        } else {
-        Some(Ordering::Greater)
-        }
-      }
-  }
-  impl PartialEq for Stride {
-      fn eq(&self, other: &Self) -> bool {
-          false
-      }
-  }
-  ```
+1. root_node存储了所有目录，索引所有文件的inode
+2. 如果root_node损坏，就找不到存储的文件了
+3. pipline的使用，linux中命令行的“|”、“>”
+4. 多进程通信，消息队列，先进先出，进程标识符合的读取消息
+
 
 # 荣誉准则
 1. 在完成本次实验的过程（含此前学习的过程）中，我曾分别与 以下各位 就（与本次实验相关的）以下方面做过交流，还在代码中对应的位置以注释形式记录了具体的交流对象及内容：
