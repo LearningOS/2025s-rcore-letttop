@@ -26,7 +26,7 @@ impl BlockDevice for VirtIOBlock {
             .read_block(block_id, buf)
             .expect("Error when reading VirtIOBlk");
     }
-    ///
+    ///0
     fn write_block(&self, block_id: usize, buf: &[u8]) {
         self.0
             .exclusive_access()
