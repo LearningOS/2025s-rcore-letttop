@@ -7,7 +7,7 @@ use super::{add_task, SignalFlags};
 use super::{pid_alloc, PidHandle};
 use crate::fs::{File, Stdin, Stdout};
 use crate::mm::{translated_refmut, MemorySet, KERNEL_SPACE};
-use crate::sync::{Condvar, Mutex, Semaphore, UPSafeCell};
+use crate::sync::{Condvar, DeadlockDetector, Mutex, Semaphore, UPSafeCell};
 use crate::trap::{trap_handler, TrapContext};
 use alloc::string::String;
 use alloc::sync::{Arc, Weak};
@@ -49,6 +49,11 @@ pub struct ProcessControlBlockInner {
     pub semaphore_list: Vec<Option<Arc<Semaphore>>>,
     /// condvar list
     pub condvar_list: Vec<Option<Arc<Condvar>>>,
+
+    /// deadlock_detect
+    /// deadlock_detector[0] for mutex
+    /// deadlock_detector[1] for semaphore
+    pub deadlock_detector: Option<Vec<Arc<DeadlockDetector>>>,
 }
 
 impl ProcessControlBlockInner {
@@ -119,6 +124,7 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+                    deadlock_detector: None,
                 })
             },
         });
@@ -245,6 +251,8 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+
+                    deadlock_detector: None,
                 })
             },
         });
@@ -281,5 +289,107 @@ impl ProcessControlBlock {
     /// get pid
     pub fn getpid(&self) -> usize {
         self.pid.0
+    }
+
+    /// check deadlock detector state
+    pub fn deadlock_detect_enable(&self) -> bool {
+        self.inner.exclusive_access().deadlock_detect_enable()
+    }
+}
+impl ProcessControlBlockInner {
+    /// check deadlock detector state
+    pub fn deadlock_detect_enable(&self) -> bool {
+        self.deadlock_detector.is_some()
+    }
+    /// enable_deadlock_detect
+    pub fn enable_deadlock_detect(&mut self) {
+        if !self.deadlock_detect_enable() {
+            // 初始化死锁检测器，创建两个检测器（一个用于mutex，一个用于semaphore）
+            self.deadlock_detector = Some({
+                let mut v = Vec::with_capacity(2);
+                (0..2).for_each(|_| v.push(Arc::new(DeadlockDetector::new())));
+                v
+            });
+
+            // 获取当前线程数
+            let task_num = self.thread_count();
+
+            // 为每个检测器初始化矩阵
+            if let Some(detectors) = &self.deadlock_detector {
+                for detector in detectors.iter() {
+                    let mut dl_inner = detector.inner.exclusive_access();
+
+                    // 初始化分配矩阵和需求矩阵，每个线程一行
+                    for _ in 0..task_num {
+                        dl_inner.allocation.push(Vec::new());
+                        dl_inner.need.push(Vec::new());
+                    }
+                }
+            }
+        }
+    }
+
+    /// 为新线程添加死锁检测
+    pub fn add_thread_to_deadlock_detector(&mut self, tid: usize) {
+        if self.deadlock_detect_enable() {
+            if let Some(detectors) = &self.deadlock_detector {
+                for detector in detectors.iter() {
+                    let mut dl_inner = detector.inner.exclusive_access();
+
+                    // 确保tid在范围内
+                    while tid >= dl_inner.allocation.len() {
+                        dl_inner.allocation.push(Vec::new());
+                        dl_inner.need.push(Vec::new());
+                    }
+
+                    let resource_count = dl_inner.available.len();
+                    dl_inner.allocation[tid] = vec![0; resource_count];
+                    dl_inner.need[tid] = vec![0; resource_count];
+                }
+            }
+        }
+    }
+    /// disable_deadlock_detect
+    pub fn disable_deadlock_detect(&mut self) {
+        if self.deadlock_detect_enable() {
+            self.deadlock_detector = None;
+        }
+    }
+
+    /// remove lock by id
+    pub fn remove_mutex_by_id(&mut self, mutex_id: usize) {
+        let dl = self.deadlock_detector.clone().unwrap();
+        let mut dl_inner = dl[0].inner.exclusive_access();
+        dl_inner.available[mutex_id] = 0;
+        for alloc in dl_inner.allocation.iter_mut() {
+            alloc[mutex_id] = 0;
+        }
+        for ne in dl_inner.need.iter_mut() {
+            ne[mutex_id] = 0;
+        }
+    }
+    /// create lock
+    pub fn create_mutex(&mut self, mutex_id: Option<usize>) {
+        //
+        let id = match mutex_id {
+            Some(id) => id,
+            None => {
+                let dl = self.deadlock_detector.clone().unwrap();
+                let mut dl_inner = dl[0].inner.exclusive_access();
+                dl_inner.available.push(0);
+                for alloc in dl_inner.allocation.iter_mut() {
+                    alloc.push(0);
+                }
+                for ne in dl_inner.need.iter_mut() {
+                    ne.push(0);
+                }
+                dl_inner.available.len() - 1
+            }
+        };
+        //
+        let dl = self.deadlock_detector.clone().unwrap();
+        let mut dl_inner = dl[0].inner.exclusive_access();
+        // mutex是二元，直接设置为1
+        dl_inner.available[id] = 1;
     }
 }

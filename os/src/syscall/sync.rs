@@ -2,6 +2,8 @@ use crate::sync::{Condvar, Mutex, MutexBlocking, MutexSpin, Semaphore};
 use crate::task::{block_current_and_run_next, current_process, current_task};
 use crate::timer::{add_timer, get_time_ms};
 use alloc::sync::Arc;
+use alloc::vec;
+
 /// sleep syscall
 pub fn sys_sleep(ms: usize) -> isize {
     trace!(
@@ -24,7 +26,7 @@ pub fn sys_sleep(ms: usize) -> isize {
 /// mutex create syscall
 pub fn sys_mutex_create(blocking: bool) -> isize {
     trace!(
-        "kernel:pid[{}] tid[{}] sys_mutex_create",
+        "kernel: pid[{}] tid[{}] sys_mutex_create",
         current_task().unwrap().process.upgrade().unwrap().getpid(),
         current_task()
             .unwrap()
@@ -35,12 +37,14 @@ pub fn sys_mutex_create(blocking: bool) -> isize {
             .tid
     );
     let process = current_process();
+
     let mutex: Option<Arc<dyn Mutex>> = if !blocking {
         Some(Arc::new(MutexSpin::new()))
     } else {
         Some(Arc::new(MutexBlocking::new()))
     };
     let mut process_inner = process.inner_exclusive_access();
+    trace!("borrow process inner");
     if let Some(id) = process_inner
         .mutex_list
         .iter()
@@ -48,27 +52,107 @@ pub fn sys_mutex_create(blocking: bool) -> isize {
         .find(|(_, item)| item.is_none())
         .map(|(id, _)| id)
     {
+        // 覆盖
+        if process_inner.deadlock_detect_enable() {
+            trace!("deadlock detect enabled");
+            // 添加锁
+            process_inner.remove_mutex_by_id(id);
+            trace!(
+                "kernel: pid[{}] tid[{}] sys_mutex_create: remove mutex {}",
+                current_task().unwrap().process.upgrade().unwrap().getpid(),
+                current_task()
+                    .unwrap()
+                    .inner_exclusive_access()
+                    .res
+                    .as_ref()
+                    .unwrap()
+                    .tid,
+                id
+            );
+            process_inner.create_mutex(Some(id));
+            trace!(
+                "kernel: pid[{}] tid[{}] sys_mutex_create: cover mutex {}",
+                current_task().unwrap().process.upgrade().unwrap().getpid(),
+                current_task()
+                    .unwrap()
+                    .inner_exclusive_access()
+                    .res
+                    .as_ref()
+                    .unwrap()
+                    .tid,
+                id
+            );
+        }
         process_inner.mutex_list[id] = mutex;
         id as isize
     } else {
+        if process_inner.deadlock_detect_enable() {
+            // 添加锁
+            process_inner.create_mutex(None);
+            trace!(
+                "kernel: pid[{}] tid[{}] sys_mutex_create: create new mutex",
+                current_task().unwrap().process.upgrade().unwrap().getpid(),
+                current_task()
+                    .unwrap()
+                    .inner_exclusive_access()
+                    .res
+                    .as_ref()
+                    .unwrap()
+                    .tid,
+            );
+        }
         process_inner.mutex_list.push(mutex);
         process_inner.mutex_list.len() as isize - 1
     }
 }
 /// mutex lock syscall
 pub fn sys_mutex_lock(mutex_id: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] tid[{}] sys_mutex_lock",
-        current_task().unwrap().process.upgrade().unwrap().getpid(),
-        current_task()
-            .unwrap()
-            .inner_exclusive_access()
-            .res
-            .as_ref()
-            .unwrap()
-            .tid
-    );
+    let pid = current_task().unwrap().process.upgrade().unwrap().getpid();
+    // 获取当前线程ID
+    let tid = current_task()
+        .unwrap()
+        .inner_exclusive_access()
+        .res
+        .as_ref()
+        .unwrap()
+        .tid;
+    trace!("kernel:pid[{}] tid[{}] sys_mutex_lock", pid, tid);
     let process = current_process();
+
+    // 检查是否启用了死锁检测
+    if process.deadlock_detect_enable() {
+        trace!(
+            "kernel:pid[{}] tid[{}] sys_mutex_lock deadlock detect",
+            pid,
+            tid
+        );
+        let process_inner = process.inner_exclusive_access();
+        // 获取死锁检测器
+        let mutex_detector = process_inner.deadlock_detector.clone().unwrap()[0].clone();
+        let mutex_num = mutex_detector.inner.exclusive_access().available.len();
+
+        // 创建请求向量，对于mutex锁，只需要请求1个资源
+        let mut request = vec![0; mutex_num];
+        request[mutex_id] = 1;
+
+        // 检查是否安全
+        if !mutex_detector.is_safe_state(tid, request) {
+            trace!(
+                "kernel:pid[{}] tid[{}] sys_mutex_lock deadlock detect failed!",
+                pid,
+                tid
+            );
+            // 不安全，可能导致死锁，返回错误
+            return -0xdead;
+        }
+    }
+
+    trace!(
+        "kernel:pid[{}] tid[{}] sys_mutex_lock deadlock detect pass!",
+        pid,
+        tid
+    );
+    // lock
     let process_inner = process.inner_exclusive_access();
     let mutex = Arc::clone(process_inner.mutex_list[mutex_id].as_ref().unwrap());
     drop(process_inner);
@@ -78,19 +162,34 @@ pub fn sys_mutex_lock(mutex_id: usize) -> isize {
 }
 /// mutex unlock syscall
 pub fn sys_mutex_unlock(mutex_id: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] tid[{}] sys_mutex_unlock",
-        current_task().unwrap().process.upgrade().unwrap().getpid(),
-        current_task()
-            .unwrap()
-            .inner_exclusive_access()
-            .res
-            .as_ref()
-            .unwrap()
-            .tid
-    );
+    let pid = current_task().unwrap().process.upgrade().unwrap().getpid();
+    // 获取当前线程ID
+    let tid = current_task()
+        .unwrap()
+        .inner_exclusive_access()
+        .res
+        .as_ref()
+        .unwrap()
+        .tid;
+    trace!("kernel:pid[{}] tid[{}] sys_mutex_lock", pid, tid);
+
     let process = current_process();
     let process_inner = process.inner_exclusive_access();
+
+    // 检查是否启用了死锁检测
+    if process_inner.deadlock_detect_enable() {
+        // 获取死锁检测器
+        let mutex_detector = process_inner.deadlock_detector.clone().unwrap()[0].clone();
+        let mutex_num = mutex_detector.inner.exclusive_access().available.len();
+
+        // 创建请求向量，对于mutex锁，只需要请求1个资源
+        let mut request = vec![0; mutex_num];
+        request[mutex_id] = 1;
+
+        // 释放资源
+        mutex_detector.detector_unlock(tid, request);
+    }
+
     let mutex = Arc::clone(process_inner.mutex_list[mutex_id].as_ref().unwrap());
     drop(process_inner);
     drop(process);
@@ -245,7 +344,17 @@ pub fn sys_condvar_wait(condvar_id: usize, mutex_id: usize) -> isize {
 /// enable deadlock detection syscall
 ///
 /// YOUR JOB: Implement deadlock detection, but might not all in this syscall
-pub fn sys_enable_deadlock_detect(_enabled: usize) -> isize {
-    trace!("kernel: sys_enable_deadlock_detect NOT IMPLEMENTED");
-    -1
+pub fn sys_enable_deadlock_detect(enabled: usize) -> isize {
+    trace!("kernel: sys_enable_deadlock_detect");
+    let process = current_process();
+    let mut process_inner = process.inner_exclusive_access();
+    if enabled == 1 {
+        process_inner.enable_deadlock_detect();
+        0
+    } else if enabled == 0 {
+        process_inner.disable_deadlock_detect();
+        0
+    } else {
+        -1
+    }
 }
