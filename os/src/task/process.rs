@@ -392,4 +392,41 @@ impl ProcessControlBlockInner {
         // mutex是二元，直接设置为1
         dl_inner.available[id] = 1;
     }
+
+    /// remove lock by id
+    pub fn remove_semaphore_by_id(&mut self, semaphore_id: usize) {
+        let dl = self.deadlock_detector.clone().unwrap();
+        let mut dl_inner = dl[0].inner.exclusive_access();
+        dl_inner.available[semaphore_id] = 0;
+        for alloc in dl_inner.allocation.iter_mut() {
+            alloc[semaphore_id] = 0;
+        }
+        for ne in dl_inner.need.iter_mut() {
+            ne[semaphore_id] = 0;
+        }
+    }
+    /// create lock
+    pub fn create_semaphore(&mut self, semaphore_id: Option<usize>, res_count: usize) {
+        //
+        let id = match semaphore_id {
+            Some(id) => id,
+            None => {
+                let dl = self.deadlock_detector.clone().unwrap();
+                let mut dl_inner = dl[0].inner.exclusive_access();
+                dl_inner.available.push(0);
+                for alloc in dl_inner.allocation.iter_mut() {
+                    alloc.push(0);
+                }
+                for ne in dl_inner.need.iter_mut() {
+                    ne.push(0);
+                }
+                dl_inner.available.len() - 1
+            }
+        };
+        //
+        let dl = self.deadlock_detector.clone().unwrap();
+        let mut dl_inner = dl[0].inner.exclusive_access();
+        //
+        dl_inner.available[id] = res_count as i32;
+    }
 }

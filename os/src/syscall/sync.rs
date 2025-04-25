@@ -198,17 +198,16 @@ pub fn sys_mutex_unlock(mutex_id: usize) -> isize {
 }
 /// semaphore create syscall
 pub fn sys_semaphore_create(res_count: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] tid[{}] sys_semaphore_create",
-        current_task().unwrap().process.upgrade().unwrap().getpid(),
-        current_task()
-            .unwrap()
-            .inner_exclusive_access()
-            .res
-            .as_ref()
-            .unwrap()
-            .tid
-    );
+    let pid = current_task().unwrap().process.upgrade().unwrap().getpid();
+    // 获取当前线程ID
+    let tid = current_task()
+        .unwrap()
+        .inner_exclusive_access()
+        .res
+        .as_ref()
+        .unwrap()
+        .tid;
+    trace!("kernel:pid[{}] tid[{}] sys_semaphore_create", pid, tid);
     let process = current_process();
     let mut process_inner = process.inner_exclusive_access();
     let id = if let Some(id) = process_inner
@@ -218,9 +217,39 @@ pub fn sys_semaphore_create(res_count: usize) -> isize {
         .find(|(_, item)| item.is_none())
         .map(|(id, _)| id)
     {
+        // 覆盖
+        if process_inner.deadlock_detect_enable() {
+            trace!("deadlock detect enabled");
+            // 添加锁
+            process_inner.remove_semaphore_by_id(id);
+            trace!(
+                "kernel: pid[{}] tid[{}] sys_semaphore_create: remove semaphore {}",
+                pid,
+                tid,
+                id
+            );
+            process_inner.create_semaphore(Some(id), res_count);
+            trace!(
+                "kernel: pid[{}] tid[{}] sys_semaphore_create: cover semaphore {}",
+                pid,
+                tid,
+                id
+            );
+        }
+
         process_inner.semaphore_list[id] = Some(Arc::new(Semaphore::new(res_count)));
         id
     } else {
+        if process_inner.deadlock_detect_enable() {
+            // 添加锁
+            process_inner.create_semaphore(None, res_count);
+            trace!(
+                "kernel: pid[{}] tid[{}] sys_semaphore_create: create new semaphore",
+                pid,
+                tid,
+            );
+        }
+
         process_inner
             .semaphore_list
             .push(Some(Arc::new(Semaphore::new(res_count))));
@@ -230,41 +259,83 @@ pub fn sys_semaphore_create(res_count: usize) -> isize {
 }
 /// semaphore up syscall
 pub fn sys_semaphore_up(sem_id: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] tid[{}] sys_semaphore_up",
-        current_task().unwrap().process.upgrade().unwrap().getpid(),
-        current_task()
-            .unwrap()
-            .inner_exclusive_access()
-            .res
-            .as_ref()
-            .unwrap()
-            .tid
-    );
+    let pid = current_task().unwrap().process.upgrade().unwrap().getpid();
+    let tid = current_task()
+        .unwrap()
+        .inner_exclusive_access()
+        .res
+        .as_ref()
+        .unwrap()
+        .tid;
+    trace!("kernel:pid[{}] tid[{}] sys_semaphore_up", pid, tid);
     let process = current_process();
     let process_inner = process.inner_exclusive_access();
+
+    // 检查是否启用了死锁检测
+    if process_inner.deadlock_detect_enable() {
+        // 获取死锁检测器
+        let semaphore_detector = process_inner.deadlock_detector.clone().unwrap()[0].clone();
+        let semaphore_num = semaphore_detector.inner.exclusive_access().available.len();
+
+        // 创建请求向量
+        let mut request = vec![0; semaphore_num];
+        request[sem_id] = 1;
+
+        // 释放资源
+        semaphore_detector.detector_unlock(tid, request);
+    }
+
     let sem = Arc::clone(process_inner.semaphore_list[sem_id].as_ref().unwrap());
     drop(process_inner);
+    drop(process);
     sem.up();
     0
 }
 /// semaphore down syscall
 pub fn sys_semaphore_down(sem_id: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] tid[{}] sys_semaphore_down",
-        current_task().unwrap().process.upgrade().unwrap().getpid(),
-        current_task()
-            .unwrap()
-            .inner_exclusive_access()
-            .res
-            .as_ref()
-            .unwrap()
-            .tid
-    );
+    let pid = current_task().unwrap().process.upgrade().unwrap().getpid();
+    let tid = current_task()
+        .unwrap()
+        .inner_exclusive_access()
+        .res
+        .as_ref()
+        .unwrap()
+        .tid;
+    trace!("kernel:pid[{}] tid[{}] sys_semaphore_down", pid, tid);
+
     let process = current_process();
     let process_inner = process.inner_exclusive_access();
+
+    // 检查是否启用了死锁检测
+    if process_inner.deadlock_detect_enable() {
+        trace!(
+            "kernel:pid[{}] tid[{}] sys_semaphore_down deadlock detect",
+            pid,
+            tid
+        );
+        // 获取死锁检测器
+        let semaphore_detector = process_inner.deadlock_detector.clone().unwrap()[0].clone();
+        let semaphore_num = semaphore_detector.inner.exclusive_access().available.len();
+
+        // 创建请求向量
+        let mut request = vec![0; semaphore_num];
+        request[sem_id] = 1;
+
+        // 检查是否安全
+        if !semaphore_detector.is_safe_state(tid, request) {
+            trace!(
+                "kernel:pid[{}] tid[{}] sys_semaphore_down deadlock detect failed!",
+                pid,
+                tid
+            );
+            // 不安全，可能导致死锁，返回错误
+            return -0xdead;
+        }
+    }
+
     let sem = Arc::clone(process_inner.semaphore_list[sem_id].as_ref().unwrap());
     drop(process_inner);
+    drop(process);
     sem.down();
     0
 }
